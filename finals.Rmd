@@ -1,0 +1,417 @@
+---
+title: "FINAL EXAM"
+author: 'Amritha Menon'
+date: \today
+output:
+    pdf_document:
+        toc: true
+        toc_depth: 2
+        latex_engine: xelatex
+header-includes:
+  \usepackage{booktabs}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# INTRODUCTION
+
+The exploratory data analysis of the **Vehicle Listings** from Craigslist contains data of used cars listings posted in the US. The data provides an insight into the different types of vehicles, the quality of its life, and various other trends one can predict. This analysis could help people who are looking to buy or sell vehicles. The dataset contains various information like the type of vehicle, the manufacturer, the model, color, fuel, drives, and cylinders. One can also say how reliable craigslist is when it comes to vehicle listings.
+
+One advantage of using Craigslist is that the seller does not need to deal with any middle man and can interact with buyer. This is beneficial for both the parties as the buyer can negotiate over the price with the seller itself. And the buyer can confirm if the opposite party is a fraud or if he is genuine. The dataset is focused only on listings posted on May and April of 2021 and 2022.
+
+To thoroughly analyze the data, I seek answers to the following questions:
+
+-   Which state has the highest and the lowest number of vehicles listed ?
+
+-   What is the relationship between price and the odometer readings ?
+
+-   Does the average miles driven increase as the age of the vehicle increases ?
+
+-   What is the most popular cylinder used and what is its price?
+
+-   What is the popular fuel type in the California region ?
+
+-   What are top vehicle types according to its drive ?
+
+-   What is the trend of vehicle listing from 2005 to 2012 ?
+
+-   What are the top manufacturers and average price of vintage vehicles ?
+
+-   How does the miles traveled affect the condition of the vehicle ?
+
+-   Where are cars most manufactured in Michigan and who are the top manufacturers ?
+
+From the answers to these questions, an analysis can be made on the data.
+
+# DATA PREPROCESSING
+
+The data is read and then pre processed. To preprocess this data, I first removed columns I found irrelevant like id, Vehicle Identification Number, image, county, and region url, size, title_status, transmission, paint color, model and the description. The dataset contains certain values of type integer64 which was changed to type double for further use. All the duplicate values have also been removed and the empty strings were changed to null values to be removed later as each visualization is being made.
+
+A new column Years_used and posting_year was also created to calculate the number of years the vehicle was used and the year posted.
+
+## HEAD OF THE DATA
+
+```{r param, echo=FALSE, message=FALSE, warning=FALSE}
+dataFile = 'vehicles.csv'
+key <- "AIzaSyBn71X_SGI5wnpZvQLcFhC7dacG-DQXaHw"
+# installing libraries
+library(data.table)
+library(dplyr) 
+library(bit64)
+library(treemap)
+library(lubridate)
+library(ggplot2)
+require(scales)
+library(ggmap)
+library(usmap)
+library(ggridges)
+options(scipen = 999)
+library(ggdark)
+library(tidyverse)
+library(kableExtra)
+
+
+df <- fread(dataFile)
+# removing irrelavant columns
+df <- subset(df, select = -c(VIN,image_url, county,url,region_url,title_status,size,transmission, paint_color, id, model, description))
+# changing integer values to double
+df <-  df %>% mutate_if(is.integer64, as.double)
+# calculates the years a vehicle was driven
+date<-as.POSIXct(df$posting_date,format="%Y%m/%d %H:%M:%S")
+df[,"Posted_year"]<-2000 + as.integer(format(date,"%y"))
+df[,'Years_used'] <- (df$Posted_year - df$year)
+df <- subset(df, select = -c(posting_date))
+# removed duplicate values
+df <- df %>% distinct()
+
+# changed empty strings to NA
+df <- na_if(df,'')
+# head of table
+head_df <- df %>% drop_na()
+landscape(knitr::kable(head(head_df),"latex"))%>% 
+  kable_styling(latex_options ="HOLD_position")
+
+```
+
+# FINDINGS
+
+## STATES WITH HIGHEST AND LOWEST VEHICLE LISTINGS
+
+```{r vehicles, echo=FALSE, message=FALSE, warning=FALSE}
+# selecting the states column
+count_df <- df %>% select(state) %>% 
+  drop_na()
+# getting count of all listings by state
+count_df <- count_df %>% group_by(state) %>% summarize(count=n()) 
+# plotting on usmap
+plot_usmap(data = count_df, values='count',labels = TRUE) + scale_fill_continuous(low = "coral1", high = "purple4", name = "Vehicle listings count", label = scales::comma
+  ) + theme(legend.position = "right") + ggtitle('Vehicle listing population across the country')
+
+```
+
+The visualization represents the number of listings from each state across the country. The highest number of listings is from California and the lowest number of listings is from North Dakota.
+
+## RELATIONSHIP BETWEEN THE PRICE AND ODOMETER READINGS ON THE BASIS OF CONDITION
+
+```{r price vs odometer, echo=FALSE, message=FALSE, warning=FALSE}
+
+# removing outliers
+sc_df <-  df %>% select(price, odometer, condition) %>% drop_na()
+sc_df <- subset(sc_df, price > 100,)
+sc_df <- subset(sc_df, price < 100000,)
+sc_df <- subset(sc_df, odometer > 100,)
+sc_df <- subset(sc_df, odometer <1000000,)
+
+ggplot(sc_df, aes(odometer, price,color =condition)) + 
+  geom_smooth(formula = y ~log(x), method='lm',setColorByGroupName=FALSE) + ggtitle('Correlation between price and odometer reading based on condition') + xlab('Miles ran') + ylab('Price of vehicle') + scale_colour_manual(values = c('maroon1', 'yellow1', 'coral2', 'lawngreen','deepskyblue','firebrick2')) +dark_theme_linedraw()
+
+```
+
+The above visualization depicts the relationship between the price and odometer readings. The price of the vehicle decreases as the miles driven increases. This is based on the condition of the vehicle. Fair condition vehicles all have relatively lower price, even lower than salvage condition vehicles.
+
+## AVERAGE MILES DRIVEN FOR UPTO 60 YEAR OLD VEHICLES
+
+```{r first, echo=FALSE, message=FALSE, warning=FALSE }
+# subset of the data
+new_df <- subset(df, Years_used <= 60)
+new_df <- subset(new_df, Years_used >= 0)
+new_df <- subset(new_df, odometer > 100,)
+new_df <- subset(new_df, odometer <300000,)
+new_df <- new_df %>% select(odometer, Years_used) %>% drop_na()
+# creating bins of years
+new_df$bins <- cut(new_df$Years_used,breaks = c(0, 10, 20, 30, 40, 50, 60))
+new_df <- new_df %>% select(odometer, Years_used, bins) %>% drop_na()
+
+ggplot(new_df, aes(bins, odometer)) + stat_summary(fun = 'mean', color='navy',size=5, geom = 'point', shape = 18) + xlab('Years used') + ylab('Average miles driven') + ggtitle('Average miles driven over a set of years')
+
+```
+
+The analysis on the years the vehicle was used and its average miles says that the average miles increases upto 30 years, but after that point it decreases. It is surprising to see that cars with the age 50 - 60 has driven under 70000 miles. The average miles driven do not increase as the age of the vehicle increases.
+
+## MOST POPULAR CYLINDERS AND THEIR PRICES
+
+```{r cylinders, echo=FALSE, message=FALSE, warning=FALSE}
+# subset of top 3 cylinders
+cylinder_df <- df %>% filter(cylinders %in% c('6 cylinders', '4 cylinders', '8 cylinders'))
+cylinder_df <- cylinder_df %>% select(cylinders, price) %>% 
+  drop_na()
+# removing outliers
+cylinder_df <- subset(cylinder_df, price > 100,)
+cylinder_df <- subset(cylinder_df, price < 70000,)
+# plotting
+ggplot(cylinder_df, aes(x=cylinders, y = price, fill=cylinders)) +   geom_violin() + ggtitle('Distribution of top 3 cylinders based on price') + xlab('Cylinders') + ylab('Price of vehicles') + scale_fill_manual(values=c('orchid', 'seagreen1', 'paleturquoise1')) + coord_flip()
+
+```
+
+The top 3 cylinders are 4, 6, and 8 cylinders. The price of 4 cylinders are cheaper than the other two which would make it most popular. 8 cylinder vehicles are the most expensive.
+
+## POPULAR FUEL TYPE IN THE TOP 5 CALIFORNIA REGIONS
+
+```{r cali, echo=FALSE, message=FALSE, warning=FALSE}
+ggmap::register_google(key = key)
+# considering California
+map_df=df[df$state =="ca",]
+map_df=map_df[map_df$fuel !="other",]
+map_df.sub <- map_df %>% select(lat, long, region, Years_used, fuel) %>% 
+  drop_na()
+map_df.sub <- subset(map_df.sub, region %in% dplyr::count(map_df.sub, region, sort=T)[1:5]$region)
+# creating california map
+cali_map <- get_map(c(lon= -119.00, lat = 36.77),zoom = 7)
+# plotting
+ggmap(cali_map)+ geom_point(data = map_df.sub, aes(x=long,y=lat, color=region)) + facet_wrap(~fuel)+theme(axis.text.y = element_blank(),axis.text.x = element_blank(), axis.ticks = element_blank()) + ggtitle('Top 5 regions in California based on fuel') + xlab('Longitude') + ylab('Latitude')
+```
+
+Gas type vehicles are the most popular across all the top 5 regions of California. The San Fransico bay area is also the most popular area with regards to vehicle listings. Electric cars are the least popular in California and is seen mostly in the Bay area only since it is one of the wealthiest area in California.
+
+## TOP 5 TYPES OF VEHICLES AND THEIR DRIVE TYPE
+
+```{r drive vs type, echo=FALSE, message=FALSE, warning=FALSE}
+group_df <- df %>% select(type, drive) %>% drop_na()
+# picking top 5 types
+group_df <- group_df %>% filter(type %in% c('truck', 'SUV', 'sedan', 'pickup', 'coupe'))
+group_df <- group_df %>% group_by(type, drive) %>%
+  summarize (count = n())
+# plotting
+ggplot(group_df, aes(x=reorder(type,count),fill=drive, y =count))+ 
+    geom_bar(position="dodge", stat="identity") + scale_fill_manual(values = c('dodgerblue4','steelblue2', 'skyblue')) + ggtitle('Intersection of drive and top 5 types of vehicles') + xlab('Type of vehicle') + ylab('Count of vehicles')
+```
+
+The most popular drive is four wheel drive which is popular in trucks, pickups and SUV but Sedans' most popular drive is forward wheel drive. The reverse wheel drive is most popular in a coupe.
+
+## TREND OF VEHICLE LISTING FROM 2005 TO 2012
+
+```{r Trend of vehicle listing years from 2005 to 2010, echo=FALSE, message=FALSE, warning=FALSE}
+# removing outliers and taking subset
+dep_df <- df %>% select(year,price,odometer) %>% drop_na()
+dep_df <- subset(dep_df, year >= 2005,)
+dep_df <- subset(dep_df, year <= 2012,)
+dep_df <- subset(dep_df, price > 100,)
+dep_df <- subset(dep_df, price < 100000,)
+dep_df <- subset(dep_df, odometer > 100,)
+dep_df <- subset(dep_df, odometer <1000000,)
+dep_df <- dep_df %>% group_by(year) %>%
+  summarize(count=n())
+# plotting
+ggplot(dep_df, aes(x=year, y=count, label=count)) + geom_line(color='green2') + geom_label(size=2) + ggtitle('Vehicles bought from 2005 to 2012') + xlab('Year bought') + ylab('Number of vehicles')
+
+```
+
+The number of vehicle listings increase slowly from 2005 but there is a huge dip in 2009 and then there was a huge steady increase. The slow increase from 2005 and the dip in 2009 could indicate the great recession period in the US where all industries including automobile industry were hit hard. After the great recession period, we can see that the vehicle listings are increasing in high numbers.
+
+## AVERAGE PRICE OF VINTAGE VEHICLES ACCORDING TO MANUFACTURER
+
+```{r price of vintage vehicles, echo=FALSE, message=TRUE, warning=TRUE}
+# removing outliers and subsetting
+vintage_df <- subset(df, Years_used > 45,)
+vintage_df <- subset(vintage_df, Years_used < 90,)
+vintage_df <- subset(vintage_df, odometer > 500,)
+vintage_df <- vintage_df %>% select(price, manufacturer) %>% drop_na()
+vintage_df <- subset(vintage_df, price > 100,)
+vintage_df <- subset(vintage_df, price < 250000)
+vintage_df <- subset(vintage_df, price != 111111)
+vintage_df <- vintage_df %>% group_by(manufacturer) %>%
+  summarize(avg_price = mean(price))
+# getting the top 10 vintage vehicle manufacturer
+vintage_df <- vintage_df %>%
+    arrange(desc(avg_price)) %>%
+    slice(1:10)
+vintage_df$manufacturer = with(vintage_df, reorder(manufacturer, avg_price))
+# plotting
+ggplot(vintage_df, aes(x=manufacturer, y=avg_price))+geom_segment( aes(x=manufacturer, xend=manufacturer, y=0, yend=avg_price))+geom_point( size=3, color="red", fill=alpha("deeppink", 0.4), alpha=0.5, shape=21, stroke=2) + theme(axis.text.x = element_text(angle = 90), axis.ticks=element_blank()) + ggtitle('Top 10 vintage vehicles manufacturers and their average price') + xlab('Manufacturer') + ylab('Average price of vintage vehicles') + ylim(0, 70000)+dark_theme_linedraw() + scale_x_discrete(guide = guide_axis(n.dodge=3))
+```
+
+When it comes to vintage vehicles, other than the most popular manufacturers, the average price is below \$20,000. Porsche, Jaguar, Ram, Morgan are the top vintage vehicle manufacturers.
+
+## CHANGE IN CONDITION OF VEHICLE BASED ON MILES DRIVEN
+
+```{r type of vehicle vs price, echo=FALSE, message=FALSE, warning=FALSE}
+# subsetting the required columns
+cp_df <- df %>% select(odometer, type, condition) %>% drop_na()
+cp_df <- subset(cp_df, odometer > 1000,)
+cp_df <- subset(cp_df, odometer <300000,)
+# removing outliers
+cp_df <- subset(cp_df, type != 'other')
+cp_df <- subset(cp_df, type != 'offroad')
+# filtering conditions
+cp_df <- cp_df %>% filter(condition %in% c('new', 'excellent','fair'))
+# plotting
+ggplot(cp_df, aes(x=odometer, y = type, fill = type))+ geom_density_ridges() + facet_wrap(~condition) + theme(axis.text.x = element_text(angle = 90)) + xlim(0, 300000) + ggtitle('Type of vehicle vs Odometer readings based on condition of vehicle') + xlab('Miles ran') + ylab('Type of vehicle')  + scale_fill_brewer(palette = 'PiYG')+  dark_theme_linedraw() + guides(fill = FALSE) 
+
+```
+
+The visualization represents how the miles driven by the vehicle affects the condition of the vehicle based on the type of vehicle. The new vehicles have driven the lowest miles all over and the fair vehicles have driven the most. Bus is the vehicle is that has traveled more miles across all three conditions.
+
+## MICHIGAN'S TOP MANUFCATURERS IN ITS TOP REGIONS
+
+```{r michigan region top maunfacturers, echo=FALSE, message=FALSE, warning=FALSE}
+
+michigan_df <- df %>% filter(state %in% c('mi'))
+
+detroit_df <- michigan_df %>% filter(region %in% c('detroit metro'))
+rapids_df <- michigan_df %>% filter(region %in% c('grand rapids'))
+lans_df <- michigan_df %>% filter(region %in% c('lansing'))
+detroit_df <- detroit_df %>% select(region, manufacturer)%>% 
+  drop_na()
+rapids_df <- rapids_df %>% select(region, manufacturer)%>% 
+  drop_na()
+lans_df <- lans_df %>% select(region, manufacturer)%>% 
+  drop_na()
+detroit_df <- detroit_df %>% group_by(manufacturer) %>% summarize(count=n()) %>% top_n(5)
+
+rapids_df <- rapids_df %>% group_by(manufacturer) %>% summarize(count=n()) %>% top_n(5)
+lans_df <- lans_df %>% group_by(manufacturer) %>% summarize(count=n()) %>% top_n(5)
+detroit_df$region <- c('detroit metro','detroit metro','detroit metro','detroit metro','detroit metro')
+rapids_df$region <- c('grand rapids','grand rapids','grand rapids','grand rapids','grand rapids')
+lans_df$region <- c('lansing','lansing','lansing','lansing','lansing')
+combined_df <- do.call('rbind',list(detroit_df, rapids_df, lans_df))
+
+treemap(combined_df, 
+        index=c('region', 'manufacturer'), 
+        type='index', 
+        vSize = 'count', 
+        palette='Spectral', 
+        fontcolor.labels=c("white","black"), 
+        fontsize.labels=c(15,12),
+        align.labels=list(c("center", "center"),
+                          c("left", "bottom")), 
+        title="Top 5 manufacturers in top 5 regions of Michigan",
+        fontsize.title = 20)
+
+```
+
+Michigan is known for the automobile industry. The top manufacturer in Michigan are Ford, Chevrolet, Jeep, Gmc, Dodge, and Ram. The top regions in Michigan where vehicle manufacturing is done are the Grand Rapids, Detroit, and Lansing.
+
+# CONCLUSION
+
+The Exploratory Data Analysis of the vehicle listings dataset proved efficient in understanding all the various factors that affect the price of a vehicle. This analysis can also be helpful in predicting future trends regarding the data. The data had a lot of outliers and missing values which was removed. I also found some listings where the values were randomly added by the user which made me doubt the credibility of the listing and so those values were also removed.
+
+Looking at the number of listings state wise, ***California*** tops the list. This makes sense because California is the most populous state in the US. While just considering the state of California, it is evident that most popular fuel type used is ***gas vehicles*** especially in the ***San Francisco bay area***. ***Electric vehicles*** are the least popular here, especially in the ***Sacramento region*** even though the region's population is pretty high.
+
+While comparing the ***price and odometer readings*** for the all the listings, it can be seen that they are ***inversely proportional*** each other. When looking at this relationship on the basis of the condition of the vehicle, ***Fair and Salvage*** condition vehicles are very low in price and the ***New*** vehicles are very high in price which makes sense.
+
+When observing the average miles driven, if we consider the age of the vehicle in groups of 10, upto ***30 years*** the average miles driven increase but there is a decrease after. A reason for the decrease could be that since the vehicle is very old, in those times people did not drive much which has been reflected in this data. The miles driven by the vehicle also affects the condition of the vehicle. It can be seen that new and good condition vehicles have driven very few miles when compared to vehicles in the fair condition.
+
+Going through the other features of a vehicle like cylinders and drives, it is seen that ***4 cylinder*** vehicles are the ***cheapest*** and most preferred among people. The ***8 cylinder*** vehicles are not preferred as much and they are more ***expensive*** than the 4 cylinder vehicles. The different drives of a vehicle also depends on the type of the vehicle. ***Sedan***'s most popular drive is ***forward wheel drive*** which could be a reason why it is preferred most in the snowy states.
+
+There were a variety of manufacturers in the listings where ***Ford, Cheverolet*** and ***Toyota*** tops the list. When considering ***Vintage vehicles***, vehicles that are 45 years and older, the top manufacturers are ***Porsche, Ferrari, Mercedes, Pontiac,*** and ***Jaguar*** and their ***average price*** is high being a vintage classic vehicle. It is surprising that the top three manufacturers are not in the top vintage vehicle manufacturers.
+
+An analysis was also made on ***Michigan***. Michigan is number one automobile manufacturer state in the US. ***Detroit*** and ***Grand Rapids*** are the top regions in Michigan where vehicles are manufactured. Looking at the top here, it is interesting that ***Toyota*** is not in the top among the popular regions.
+
+Overall, the analysis tells us that some key factors in buying a vehicle would be its drive, cylinder, price, manufacture,r and the mileage it would give. This could help people looking to buy a vehicle off craigslist since most vehicles are second handed.
+
+# APPENDIX
+
+## DATA DICTIONARY
+
+The data regarding all the relevant columns are listed here:
+
+### Region
+
+The region column specifies the Craigslist region in each state.
+
+Example: Sacremento, Detroit, Florida Keys
+
+### Price
+
+The price at which the vehicle is being sold. Value varies from 3736928711.
+
+### Year
+
+The year in which the vehicle was bought. Values vary from 1990 to 2022.
+
+### Manufacturer
+
+The manufacturer of the vehicle listed.
+
+Example : Ford, Tesla, Toyota
+
+### Condition
+
+The condition of the vehicle currently.
+
+Example: Fair, New, Excellent, Like new.
+
+### Cylinders
+
+The number of cylinders that the vehicle possesses.
+
+Example: 4 cylinders, 12 cylinders, 8 cylinders
+
+### Fuel
+
+The type of fuel the vehicle uses.
+
+Example : Gas, Electric, Diesel, and Hybrid
+
+### Odometer
+
+The miles traveled by the vehicle. The value varies from o to 10000000.
+
+### Drive
+
+The type of drive of the vehicle.
+
+Example: fwd, 4wd, and rwd
+
+### Type
+
+The type of the vehicle.
+
+Example : Bus, Truck, SUV, Sedan
+
+### State
+
+The state in which the vehicle was listed.
+
+Example: California, Michigan, FLorida
+
+### Lat
+
+The latitude of the region.
+
+Example : 25.97170
+
+### Long
+
+The longitude of the region.
+
+Example : -97.46990
+
+### posting_date
+
+The date and time at which the vehicle listing was posted.
+
+Example : 05/24/2021 5:10:10
+
+### **NEW COLUMNS**
+
+### Years_Used
+
+The number of years the car was used. It varies from 0 to 121.
+
+### Posted_Year
+
+The year the listing was posted. It is between 2021 and 2022.
